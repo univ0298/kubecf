@@ -1,6 +1,34 @@
 # REQUIRED: the domain that the deployment will be visible to the user.
 system_domain: ~
 
+install_stacks: [mystack, sle15, cflinuxfs3]
+
+stacks:
+  mystack:
+    description: There are many stacks, but this one is mine!
+    registry:
+      url: registry.example.com:5000/my-org
+      username: ~
+      password: ~
+    rootfs_image: sle15-release:SLE_15_SP1-25.2-7.0.0_374
+    # The eirini_rootfs_image is embedded in the bits-release image and cannot be configured.
+    install_buildpacks: [ruby nodejs]
+    buildpacks:
+      ruby:
+        image: suse-ruby-buildpack:SLE_15_SP1-25.2-7.0.0_374.gb8e8e6af
+        file: suse-ruby-buildpack/packages/ruby-buildpack-sle15/ruby-buildpack-sle15-v1.8.19.1-1.1-63c0bb58.zip
+      nodejs:
+        image: suse-ruby-buildpack:SLE_15_SP1-25.2-7.0.0_374.gb8e8e6af
+        file: suse-ruby-buildpack/packages/ruby-buildpack-sle15/ruby-buildpack-sle15-v1.8.19.1-1.1-63c0bb58.zip
+  sle15:
+    description: There are many stacks, but this one is sle15
+    buildpack_list: [+, newlang]
+    install_buildpacks: [ruby]
+    buildpacks:
+      ruby:
+        image: suse-ruby-buildpack:SLE_15_SP1-25.2-7.0.0_374.gb8e8e6af
+        file: suse-ruby-buildpack/packages/ruby-buildpack-sle15/ruby-buildpack-sle15-v1.8.19.1-1.1-63c0bb58.zip
+
 # Set or override job properties. The first level of the map is the instance group name. The second
 # level of the map is the job name. E.g.:
 #  properties:

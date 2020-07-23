@@ -1,0 +1,137 @@
+{{- $config := fromYaml (.Files.Get "assets/config.yaml") }}
+
+{{- /* Find value at $path under $context; return "" if not found */}}
+{{- define "kubecf.index" }}
+  {{- $context := first . }}
+  {{- $path := rest . }}
+  {{- $value := index $context (first $path) }}
+  {{- if $value }}
+    {{- if gt (len $path) 1 }}
+      {{- include "kubecf.index" (concat (list $value) (rest $path)) }}
+    {{- else }}
+      {{- $value }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+
+{{- /* Find value at $path under $context; fall back to $defaults if not found */}}
+{{- define "kubecf.lookup" }}
+  {{- $context := index . 0 }}
+  {{- $defaults := index . 1 }}
+  {{- $rest := rest (rest .) }}
+  {{- $value := include "kubecf.index" (concat (list $context) $rest) }}
+  {{- if eq $value "" }}
+    {{- include "kubecf.index" (concat (list $defaults) $rest) }}
+  {{- else }}
+    {{- $value }}
+  {{- end }}
+{{- end }}
+
+{{- /* Make sure all requested stacks are defined */}}
+{{- range $stack := .Values.install_stacks }}
+  {{- if not (include "kubecf.lookup" (list $.Values $config "stacks" $stack)) }}
+    {{ fail (printf "Stack %s is not defined" $stack) }}
+  {{- end }}
+  {{- $install_buildpacks := include "kubecf.lookup" (list $.Values $config "stacks" $stack "install_buildpacks") }}
+  {{- if not $install_buildpacks }}
+    {{ fail (printf "Stack %s does not define install_buildpacks list" $stack) }}
+  {{- end }}
+  {{- $install_buildpacks := ($install_buildpacks | trimPrefix "[" | trimSuffix "]" | splitList " ") }}
+  {{- range $buildpack := $install_buildpacks }}
+    {{- if not (include "kubecf.lookup" (list $.Values $config "stacks" $stack "buildpacks" $buildpack)) }}
+      {{ fail (printf "Stack %s does not define buildpack %s" $stack $buildpack) }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+
+{{- /* Map job names to instance groups */}}
+{{- $ig := dict }}
+{{- $_ := set $ig "cloud_controller_ng"     "api"       }}
+{{- $_ := set $ig "cloud_controller_worker" "cc-worker" }}
+{{- $_ := set $ig "cloud_controller_clock"  "scheduler" }}
+{{- $_ := set $ig "cc_deployment_updater"   "scheduler" }}
+
+# set default_stack
+{{- range $job := keys $ig }}
+- type: replace
+  path: /instance_groups/name={{ get $ig $job }}/jobs/name={{ $job }}/properties/cc/default_stack?
+  value: {{ $.Values.install_stacks | first | quote }}
+{{- end }}
+
+# set list of stacks
+- type: replace
+  path: /instance_groups/name=api/jobs/name=cloud_controller_ng/properties/cc/stacks/-
+  value:
+{{- range $stack := .Values.install_stacks }}
+    name: {{ $stack | quote }}
+    description:  {{ include "kubecf.lookup" (list $.Values $config "stacks" $stack "description") | quote }}
+{{- end }}
+
+- type: replace
+  path: /instance_groups/name=api/jobs/name=cloud_controller_ng/properties/cc/diego/lifecycle_bundles?
+  value:
+{{- range $stack := .Values.install_stacks }}
+    buildpack/{{ $stack }}: buildpack_app_lifecycle/buildpack_app_lifecycle.tgz
+{{- end }}
+    docker: docker_app_lifecycle/docker_app_lifecycle.tgz
+
+# set list of all buildpacks in install order
+{{- $path := "/var/vcap/data/shared-packages/" }}
+- type: replace
+  path: /instance_groups/name=api/jobs/name=cloud_controller_ng/properties/cc/install_buildpacks
+  value:
+{{- range $stack := .Values.install_stacks }}
+{{- $install_buildpacks := (include "kubecf.lookup" (list $.Values $config "stacks" $stack "install_buildpacks") | trimPrefix "[" | trimSuffix "]" | splitList " ") }}
+  {{- range $buildpack := $install_buildpacks }}
+  - name: {{ $buildpack }}_buildpack_{{ $stack }}
+    file: {{ $path }}{{ include "kubecf.lookup" (list $.Values $config "stacks" $stack "buildpacks" $buildpack "file") }}
+  {{- end }}
+{{- end }}
+
+# create pre-rendering scripts
+{{- range $stack := .Values.install_stacks }}
+{{- $install_buildpacks := (include "kubecf.lookup" (list $.Values $config "stacks" $stack "install_buildpacks") | trimPrefix "[" | trimSuffix "]" | splitList " ") }}
+  {{- range $buildpack := $install_buildpacks }}
+    {{- $job := default (printf "%s-buildpack" $buildpack) (include "kubecf.lookup" (list $.Values $config "stacks" $stack "buildpacks" $buildpack "job")) }}
+- type: replace
+  path: /instance_groups/name=api/jobs/name={{ $job }}/properties?/quarks/pre_render_scripts/jobs/-
+  value: |
+    #!/usr/bin/env bash
+
+    # Create the pre-start script that copies the buildpack package to /var/vcap/data/shared-packages/.
+
+    set -o errexit -o nounset
+
+    release={{ $job | quote }}
+    buildpack={{ $job | quote }}
+
+    pre_start="/var/vcap/all-releases/jobs-src/${release}/${buildpack}/templates/bin/pre-start"
+    copy_dst="/var/vcap/data/shared-packages/${buildpack}/"
+    mkdir -p "$(dirname "${pre_start}")"
+    cat <<EOT > "${pre_start}"
+    #!/usr/bin/env bash
+    set -o errexit
+    mkdir -p "${copy_dst}"
+    cp -r /var/vcap/packages "${copy_dst}"
+    EOT
+- type: replace
+  path: /instance_groups/name=api/jobs/name={{ $job }}/properties?/quarks/pre_render_scripts/ig_resolver/-
+  value: |
+    #!/usr/bin/env bash
+
+    # Add bin/pre-start to the buildpack job templates.
+
+    set -o errexit -o nounset
+
+    release={{ $job | quote }}
+    job={{ $job | quote }}
+
+    job_mf="/var/vcap/all-releases/jobs-src/${release}/${job}/job.MF"
+
+    sed -i 's|templates: {}||' "${job_mf}"
+    cat <<EOT > "${job_mf}"
+    templates:
+      bin/pre-start: bin/pre-start
+    EOT
+  {{- end }}
+{{- end }}
