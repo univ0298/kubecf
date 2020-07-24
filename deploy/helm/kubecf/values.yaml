@@ -22,6 +22,7 @@ stacks:
         file: suse-ruby-buildpack/packages/ruby-buildpack-sle15/ruby-buildpack-sle15-v1.8.19.1-1.1-63c0bb58.zip
   sle15:
     description: There are many stacks, but this one is sle15
+    version: "10.93"
     buildpack_list: [+, newlang]
     install_buildpacks: [ruby]
     buildpacks:

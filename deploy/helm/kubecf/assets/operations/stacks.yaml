@@ -27,11 +27,20 @@
   {{- end }}
 {{- end }}
 
+
 {{- /* Make sure all requested stacks are defined */}}
 {{- range $stack := .Values.install_stacks }}
   {{- if not (include "kubecf.lookup" (list $.Values $config "stacks" $stack)) }}
     {{ fail (printf "Stack %s is not defined" $stack) }}
   {{- end }}
+- type: remove
+  path: /releases/name={{ $stack }}?
+- type: replace
+  path: /releases/-
+  value:
+    name: {{ $stack | quote }}
+    version: {{ include "kubecf.lookup" (list $.Values $config "stacks" $stack "version") | quote }}
+    url: {{ include "kubecf.lookup" (list $.Values $config "stacks" $stack "url") | quote }}
   {{- $install_buildpacks := include "kubecf.lookup" (list $.Values $config "stacks" $stack "install_buildpacks") }}
   {{- if not $install_buildpacks }}
     {{ fail (printf "Stack %s does not define install_buildpacks list" $stack) }}
