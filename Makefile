@@ -13,7 +13,7 @@ version:
 update-subcharts:
 	@./scripts/update-subcharts.sh
 
-lint: shellcheck yamllint helmlint
+lint: shellcheck yamllint helmlint httplint
 
 helmlint:
 	@./scripts/helmlint.sh
@@ -23,6 +23,10 @@ shellcheck:
 
 yamllint:
 	@./scripts/yamllint.sh
+
+.PHONY: httplint
+httplint:
+	@./src/kubecf-tools/httplint/httplint.sh
 
 ########################################################################
 # Build
